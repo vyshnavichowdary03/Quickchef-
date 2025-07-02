@@ -60,11 +60,25 @@ export default function Hero() {
             className="relative max-w-4xl mx-auto"
           >
             <div className="relative rounded-2xl overflow-hidden shadow-2xl">
-              <img
-                src="https://images.pexels.com/photos/1640777/pexels-photo-1640777.jpeg?auto=compress&cs=tinysrgb&w=1200"
-                alt="Delicious Indian curry with rice and vegetables"
+              <video
+                autoPlay
+                muted
+                loop
+                playsInline
                 className="w-full h-64 md:h-80 object-cover"
-              />
+                poster="https://images.pexels.com/photos/1640777/pexels-photo-1640777.jpeg?auto=compress&cs=tinysrgb&w=1200"
+              >
+                <source 
+                  src="https://ik.imagekit.io/ouyrsdcro/20250703_0025_Mindful%20Nourishment%20Explosion_simple_compose_01jz67wcqhf0mse5qazbb5td02.mp4?updatedAt=1751484503601" 
+                  type="video/mp4" 
+                />
+                {/* Fallback image if video fails to load */}
+                <img
+                  src="https://images.pexels.com/photos/1640777/pexels-photo-1640777.jpeg?auto=compress&cs=tinysrgb&w=1200"
+                  alt="Delicious Indian curry with rice and vegetables"
+                  className="w-full h-64 md:h-80 object-cover"
+                />
+              </video>
               <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent"></div>
               <div className="absolute bottom-6 left-6 text-white">
                 <h3 className="text-xl font-semibold mb-2">From Your Ingredients</h3>
