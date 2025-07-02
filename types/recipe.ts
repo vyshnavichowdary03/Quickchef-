@@ -6,7 +6,7 @@ export interface Recipe {
   cookTime: number;
   servings: number;
   difficulty: 'Easy' | 'Medium' | 'Hard';
-  category: string;
+  category?: string;
   ingredients: string[];
   instructions: string[];
   nutrition: {
@@ -15,9 +15,9 @@ export interface Recipe {
     carbs: number;
     fat: number;
   };
-  tags: string[];
-  rating: number;
-  reviews: number;
+  tags?: string[];
+  rating?: number;
+  reviews?: number;
 }
 
 export interface RecipeFilters {
@@ -25,4 +25,11 @@ export interface RecipeFilters {
   difficulty: string;
   maxCookTime: number;
   searchTerm: string;
+}
+
+declare global {
+  interface Window {
+    webkitSpeechRecognition: any;
+    SpeechRecognition: any;
+  }
 }

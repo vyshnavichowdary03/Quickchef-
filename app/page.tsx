@@ -1,119 +1,106 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import Header from '@/components/Header';
 import Hero from '@/components/Hero';
-import FilterBar from '@/components/FilterBar';
-import RecipeGrid from '@/components/RecipeGrid';
-import RecipeModal from '@/components/RecipeModal';
-import { recipes } from '@/data/recipes';
-import { Recipe, RecipeFilters } from '@/types/recipe';
+import ImageUpload from '@/components/ImageUpload';
+import IngredientDisplay from '@/components/IngredientDisplay';
+import RecipeResults from '@/components/RecipeResults';
+import FavoriteRecipes from '@/components/FavoriteRecipes';
+import Footer from '@/components/Footer';
+import { Recipe } from '@/types/recipe';
 
 export default function Home() {
-  const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [filters, setFilters] = useState<RecipeFilters>({
-    category: 'All',
-    difficulty: 'All',
-    maxCookTime: 999,
-    searchTerm: ''
-  });
+  const [ingredients, setIngredients] = useState<string[]>([]);
+  const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [favoriteRecipes, setFavoriteRecipes] = useState<Recipe[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [currentStep, setCurrentStep] = useState<'upload' | 'ingredients' | 'recipes'>('upload');
 
-  const filteredRecipes = useMemo(() => {
-    return recipes.filter(recipe => {
-      const matchesSearch = recipe.title.toLowerCase().includes(filters.searchTerm.toLowerCase()) ||
-                           recipe.description.toLowerCase().includes(filters.searchTerm.toLowerCase()) ||
-                           recipe.tags.some(tag => tag.toLowerCase().includes(filters.searchTerm.toLowerCase()));
-      
-      const matchesCategory = filters.category === 'All' || recipe.category === filters.category;
-      const matchesDifficulty = filters.difficulty === 'All' || recipe.difficulty === filters.difficulty;
-      const matchesCookTime = recipe.cookTime <= filters.maxCookTime;
-
-      return matchesSearch && matchesCategory && matchesDifficulty && matchesCookTime;
-    });
-  }, [filters]);
-
-  const handleRecipeClick = (recipe: Recipe) => {
-    setSelectedRecipe(recipe);
-    setIsModalOpen(true);
+  const handleIngredientsDetected = (detectedIngredients: string[]) => {
+    setIngredients(detectedIngredients);
+    setCurrentStep('ingredients');
   };
 
-  const handleCloseModal = () => {
-    setIsModalOpen(false);
-    setSelectedRecipe(null);
+  const handleGenerateRecipes = async (finalIngredients: string[]) => {
+    setIsLoading(true);
+    try {
+      const response = await fetch('/api/generate-recipes', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ingredients: finalIngredients }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to generate recipes');
+      }
+
+      const generatedRecipes = await response.json();
+      setRecipes(generatedRecipes);
+      setCurrentStep('recipes');
+    } catch (error) {
+      console.error('Error generating recipes:', error);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleSearch = (searchTerm: string) => {
-    setFilters(prev => ({ ...prev, searchTerm }));
+  const handleAddToFavorites = (recipe: Recipe) => {
+    if (!favoriteRecipes.find(fav => fav.id === recipe.id)) {
+      setFavoriteRecipes(prev => [...prev, recipe]);
+    }
+  };
+
+  const handleRemoveFromFavorites = (recipeId: string) => {
+    setFavoriteRecipes(prev => prev.filter(recipe => recipe.id !== recipeId));
+  };
+
+  const handleStartOver = () => {
+    setIngredients([]);
+    setRecipes([]);
+    setCurrentStep('upload');
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Header onSearch={handleSearch} searchTerm={filters.searchTerm} />
-      <Hero />
-      <FilterBar filters={filters} onFiltersChange={setFilters} />
+    <div className="min-h-screen bg-background spice-pattern">
+      <Header />
       
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div className="mb-8">
-          <h2 className="text-3xl font-bold text-gray-900 mb-2">
-            {filters.searchTerm ? `Search Results for "${filters.searchTerm}"` : 'Featured Recipes'}
-          </h2>
-          <p className="text-gray-600">
-            {filteredRecipes.length} recipe{filteredRecipes.length !== 1 ? 's' : ''} found
-          </p>
-        </div>
-        
-        <RecipeGrid recipes={filteredRecipes} onRecipeClick={handleRecipeClick} />
-      </main>
+      {currentStep === 'upload' && (
+        <>
+          <Hero />
+          <ImageUpload onIngredientsDetected={handleIngredientsDetected} />
+        </>
+      )}
 
-      <RecipeModal
-        recipe={selectedRecipe}
-        isOpen={isModalOpen}
-        onClose={handleCloseModal}
-      />
+      {currentStep === 'ingredients' && (
+        <IngredientDisplay
+          ingredients={ingredients}
+          onIngredientsChange={setIngredients}
+          onGenerateRecipes={handleGenerateRecipes}
+          isLoading={isLoading}
+          onStartOver={handleStartOver}
+        />
+      )}
 
-      <footer className="bg-gray-900 text-white py-12 mt-16">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
-            <div>
-              <h3 className="text-lg font-semibold mb-4">QuickChef</h3>
-              <p className="text-gray-400">
-                Discover amazing recipes from around the world and cook with confidence.
-              </p>
-            </div>
-            <div>
-              <h4 className="font-semibold mb-4">Recipes</h4>
-              <ul className="space-y-2 text-gray-400">
-                <li><a href="#" className="hover:text-white transition-colors">Italian</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Asian</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Desserts</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Quick Meals</a></li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="font-semibold mb-4">Company</h4>
-              <ul className="space-y-2 text-gray-400">
-                <li><a href="#" className="hover:text-white transition-colors">About</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Contact</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Privacy</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Terms</a></li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="font-semibold mb-4">Follow Us</h4>
-              <ul className="space-y-2 text-gray-400">
-                <li><a href="#" className="hover:text-white transition-colors">Instagram</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Facebook</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Twitter</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">YouTube</a></li>
-              </ul>
-            </div>
-          </div>
-          <div className="border-t border-gray-800 mt-8 pt-8 text-center text-gray-400">
-            <p>&copy; 2024 QuickChef. All rights reserved.</p>
-          </div>
-        </div>
-      </footer>
+      {currentStep === 'recipes' && (
+        <RecipeResults
+          recipes={recipes}
+          favoriteRecipes={favoriteRecipes}
+          onAddToFavorites={handleAddToFavorites}
+          onStartOver={handleStartOver}
+        />
+      )}
+
+      {favoriteRecipes.length > 0 && (
+        <FavoriteRecipes
+          recipes={favoriteRecipes}
+          onRemoveFromFavorites={handleRemoveFromFavorites}
+        />
+      )}
+
+      <Footer />
     </div>
   );
 }
