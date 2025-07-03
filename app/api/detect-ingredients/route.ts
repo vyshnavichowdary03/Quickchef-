@@ -9,6 +9,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No image provided' }, { status: 400 });
     }
 
+    // Check if Roboflow API key is available
+    if (!process.env.ROBOFLOW_API_KEY) {
+      console.warn('Roboflow API key not found, using fallback ingredients');
+      return NextResponse.json({
+        ingredients: ['tomatoes', 'onions', 'garlic', 'ginger', 'rice', 'chicken'],
+        message: 'Roboflow API key not configured. Using sample ingredients.'
+      });
+    }
+
     // Convert image to base64 for Roboflow API
     const bytes = await image.arrayBuffer();
     const base64 = Buffer.from(bytes).toString('base64');
@@ -26,7 +35,8 @@ export async function POST(request: NextRequest) {
     );
 
     if (!roboflowResponse.ok) {
-      throw new Error('Roboflow API request failed');
+      console.error('Roboflow API request failed:', roboflowResponse.status, roboflowResponse.statusText);
+      throw new Error(`Roboflow API request failed: ${roboflowResponse.status}`);
     }
 
     const roboflowData = await roboflowResponse.json();
