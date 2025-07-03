@@ -223,7 +223,7 @@ async function tryRoboflowDetection(image: File) {
         
         const roboflowResponse = await retryWithBackoff(async () => {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+          const timeoutId = setTimeout(() => controller.abort(), 25000); // Increased timeout to 25 seconds
           
           try {
             const response = await fetch(
@@ -243,7 +243,7 @@ async function tryRoboflowDetection(image: File) {
             clearTimeout(timeoutId);
             throw error;
           }
-        }, 2, 3000); // 2 retries with 3 second base delay
+        }, 3, 4000); // Increased to 3 retries with 4 second base delay
 
         console.log(`Roboflow response status for ${endpoint}:`, roboflowResponse.status);
         
