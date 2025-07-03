@@ -1,4 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
+import OpenAI from 'openai';
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 export async function POST(request: NextRequest) {
   try {
@@ -9,77 +14,152 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No image provided' }, { status: 400 });
     }
 
-    // Check if Roboflow API key is available
-    if (!process.env.ROBOFLOW_API_KEY) {
-      console.warn('Roboflow API key not found, using fallback ingredients');
+    // Check if OpenAI API key is available
+    if (!process.env.OPENAI_API_KEY) {
+      console.warn('OpenAI API key not found, using fallback ingredients');
       return NextResponse.json({
         ingredients: ['tomatoes', 'onions', 'garlic', 'ginger', 'rice', 'chicken'],
-        message: 'Roboflow API key not configured. Using sample ingredients.'
+        message: 'OpenAI API key not configured. Using sample ingredients.'
       });
     }
 
     try {
-      // Convert image to base64 for Roboflow API
+      // Convert image to base64 for OpenAI Vision API
       const bytes = await image.arrayBuffer();
       const base64 = Buffer.from(bytes).toString('base64');
+      const mimeType = image.type || 'image/jpeg';
 
-      // Call Roboflow API
-      const roboflowResponse = await fetch(
-        `https://detect.roboflow.com/ingredients-detection/1?api_key=${process.env.ROBOFLOW_API_KEY}`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          body: base64,
-        }
-      );
+      // Call OpenAI Vision API to detect ingredients
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: `Analyze this image and identify all the food ingredients, vegetables, fruits, spices, grains, proteins, and other cooking ingredients visible. 
 
-      if (!roboflowResponse.ok) {
-        // Handle specific API errors
-        if (roboflowResponse.status === 403) {
-          console.warn('Roboflow API key is invalid or expired (403 Forbidden). Using fallback ingredients.');
-          return NextResponse.json({
-            ingredients: ['tomatoes', 'onions', 'garlic', 'ginger', 'rice', 'chicken'],
-            message: 'API key issue detected. Using sample ingredients for now.'
-          });
-        } else if (roboflowResponse.status === 401) {
-          console.warn('Roboflow API authentication failed (401 Unauthorized). Using fallback ingredients.');
-          return NextResponse.json({
-            ingredients: ['tomatoes', 'onions', 'garlic', 'ginger', 'rice', 'chicken'],
-            message: 'Authentication failed. Using sample ingredients for now.'
-          });
-        } else {
-          console.warn(`Roboflow API request failed: ${roboflowResponse.status} ${roboflowResponse.statusText}. Using fallback ingredients.`);
-          return NextResponse.json({
-            ingredients: ['tomatoes', 'onions', 'garlic', 'ginger', 'rice', 'chicken'],
-            message: 'API service temporarily unavailable. Using sample ingredients.'
-          });
-        }
+Please return ONLY a JSON array of ingredient names in lowercase, like this format:
+["tomatoes", "onions", "garlic", "ginger", "rice", "chicken", "cilantro"]
+
+Focus on:
+- Fresh vegetables and fruits
+- Grains, legumes, and cereals
+- Proteins (meat, fish, eggs, dairy)
+- Spices and herbs
+- Cooking oils and condiments
+- Any packaged food items
+
+Be specific but use common ingredient names that would be used in cooking recipes. If you see multiple varieties of the same ingredient, just list the main ingredient once.`
+              },
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:${mimeType};base64,${base64}`,
+                  detail: "high"
+                }
+              }
+            ]
+          }
+        ],
+        max_tokens: 500,
+        temperature: 0.3,
+      });
+
+      const content = response.choices[0]?.message?.content;
+      if (!content) {
+        throw new Error('No content received from OpenAI Vision API');
       }
 
-      const roboflowData = await roboflowResponse.json();
-      
-      // Extract ingredient names from predictions
-      const ingredients = roboflowData.predictions?.map((prediction: any) => 
-        prediction.class || prediction.name
-      ) || [];
+      // Parse the JSON response
+      let ingredients;
+      try {
+        // Clean the response in case there's extra text
+        const jsonMatch = content.match(/\[.*\]/);
+        const jsonString = jsonMatch ? jsonMatch[0] : content;
+        ingredients = JSON.parse(jsonString);
+      } catch (parseError) {
+        console.error('Failed to parse OpenAI response:', content);
+        // Try to extract ingredients from text if JSON parsing fails
+        const textIngredients = content
+          .toLowerCase()
+          .split(/[,\n]/)
+          .map(item => item.trim().replace(/[^\w\s]/g, ''))
+          .filter(item => item.length > 2 && item.length < 30)
+          .slice(0, 10);
+        
+        ingredients = textIngredients.length > 0 ? textIngredients : ['tomatoes', 'onions', 'garlic'];
+      }
 
-      // Remove duplicates and filter out low confidence predictions
-      const uniqueIngredients = [...new Set(ingredients)].filter(Boolean);
+      // Validate and clean ingredients array
+      if (!Array.isArray(ingredients)) {
+        throw new Error('Invalid ingredients format from OpenAI');
+      }
+
+      // Filter and clean ingredients
+      const cleanedIngredients = ingredients
+        .filter(ingredient => typeof ingredient === 'string' && ingredient.trim().length > 0)
+        .map(ingredient => ingredient.trim().toLowerCase())
+        .filter(ingredient => ingredient.length > 1 && ingredient.length < 30)
+        .slice(0, 15); // Limit to 15 ingredients max
+
+      // Remove duplicates
+      const uniqueIngredients = [...new Set(cleanedIngredients)];
 
       // If no ingredients detected, return some common ones as fallback
       if (uniqueIngredients.length === 0) {
         return NextResponse.json({
           ingredients: ['tomatoes', 'onions', 'garlic', 'ginger'],
-          message: 'No specific ingredients detected. Here are some common ones to get started.'
+          message: 'No specific ingredients detected in the image. Here are some common ones to get started.'
         });
       }
 
-      return NextResponse.json({ ingredients: uniqueIngredients });
+      return NextResponse.json({ 
+        ingredients: uniqueIngredients,
+        message: `Detected ${uniqueIngredients.length} ingredients from your image.`
+      });
+
     } catch (apiError) {
-      // Handle any API-related errors gracefully
-      console.warn('Roboflow API call failed:', apiError);
+      console.error('OpenAI Vision API call failed:', apiError);
+      
+      // Fallback to Roboflow if available
+      if (process.env.ROBOFLOW_API_KEY) {
+        try {
+          const bytes = await image.arrayBuffer();
+          const base64 = Buffer.from(bytes).toString('base64');
+
+          const roboflowResponse = await fetch(
+            `https://detect.roboflow.com/ingredients-detection/1?api_key=${process.env.ROBOFLOW_API_KEY}`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+              },
+              body: base64,
+            }
+          );
+
+          if (roboflowResponse.ok) {
+            const roboflowData = await roboflowResponse.json();
+            const ingredients = roboflowData.predictions?.map((prediction: any) => 
+              prediction.class || prediction.name
+            ) || [];
+            const uniqueIngredients = [...new Set(ingredients)].filter(Boolean);
+            
+            if (uniqueIngredients.length > 0) {
+              return NextResponse.json({ 
+                ingredients: uniqueIngredients,
+                message: 'Ingredients detected using backup service.'
+              });
+            }
+          }
+        } catch (roboflowError) {
+          console.warn('Roboflow fallback also failed:', roboflowError);
+        }
+      }
+
+      // Final fallback
       return NextResponse.json({
         ingredients: ['tomatoes', 'onions', 'garlic', 'ginger', 'rice', 'chicken'],
         message: 'Ingredient detection service unavailable. Using sample ingredients.'
