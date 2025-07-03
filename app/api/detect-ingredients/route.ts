@@ -3,7 +3,38 @@ import OpenAI from 'openai';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
+  timeout: 30000, // 30 second timeout
+  maxRetries: 2, // Built-in retry mechanism
 });
+
+// Helper function to add delay between retries
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Helper function to retry API calls with exponential backoff
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  baseDelay: number = 1000
+): Promise<T> {
+  let lastError: Error;
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error as Error;
+      console.log(`Attempt ${attempt + 1} failed:`, error);
+      
+      if (attempt < maxRetries - 1) {
+        const delayMs = baseDelay * Math.pow(2, attempt);
+        console.log(`Retrying in ${delayMs}ms...`);
+        await delay(delayMs);
+      }
+    }
+  }
+  
+  throw lastError!;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -26,18 +57,19 @@ export async function POST(request: NextRequest) {
       const base64 = Buffer.from(bytes).toString('base64');
       const mimeType = image.type || 'image/jpeg';
 
-      console.log('Attempting OpenAI Vision API call...');
+      console.log('Attempting OpenAI Vision API call with retry logic...');
 
-      // Call OpenAI Vision API to detect ingredients
-      const response = await openai.chat.completions.create({
-        model: "gpt-4o",
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: `Analyze this image carefully and identify ALL visible food ingredients, vegetables, fruits, spices, grains, proteins, and cooking ingredients.
+      // Call OpenAI Vision API with retry logic
+      const response = await retryWithBackoff(async () => {
+        return await openai.chat.completions.create({
+          model: "gpt-4o",
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: `Analyze this image carefully and identify ALL visible food ingredients, vegetables, fruits, spices, grains, proteins, and cooking ingredients.
 
 Please return ONLY a JSON array of ingredient names in lowercase, like this format:
 ["tomatoes", "onions", "garlic", "ginger", "rice", "chicken", "cilantro"]
@@ -52,20 +84,21 @@ Look for:
 - Dried ingredients like lentils, beans, nuts
 
 Be very specific and detailed. If you see different varieties or colors of the same ingredient, list them separately (e.g., "red onions", "white onions"). Include everything you can identify, even if partially visible.`
-              },
-              {
-                type: "image_url",
-                image_url: {
-                  url: `data:${mimeType};base64,${base64}`,
-                  detail: "high"
+                },
+                {
+                  type: "image_url",
+                  image_url: {
+                    url: `data:${mimeType};base64,${base64}`,
+                    detail: "high"
+                  }
                 }
-              }
-            ]
-          }
-        ],
-        max_tokens: 800,
-        temperature: 0.1,
-      });
+              ]
+            }
+          ],
+          max_tokens: 800,
+          temperature: 0.1,
+        });
+      }, 3, 2000); // 3 retries with 2 second base delay
 
       const content = response.choices[0]?.message?.content;
       if (!content) {
@@ -134,10 +167,16 @@ Be very specific and detailed. If you see different varieties or colors of the s
       });
 
     } catch (apiError) {
-      console.error('OpenAI Vision API call failed:', apiError);
+      console.error('OpenAI Vision API call failed after retries:', apiError);
       
-      // Fallback to Roboflow if available
-      console.log('Falling back to Roboflow...');
+      // Check if it's a network-related error
+      const errorMessage = (apiError as Error).message.toLowerCase();
+      if (errorMessage.includes('connection') || errorMessage.includes('socket') || errorMessage.includes('network')) {
+        console.log('Network error detected, falling back to Roboflow...');
+      } else {
+        console.log('API error detected, falling back to Roboflow...');
+      }
+      
       return await tryRoboflowDetection(image);
     }
   } catch (error) {
@@ -161,7 +200,7 @@ async function tryRoboflowDetection(image: File) {
   }
 
   try {
-    console.log('Attempting Roboflow API call...');
+    console.log('Attempting Roboflow API call with retry logic...');
     console.log('API Key (first 10 chars):', process.env.ROBOFLOW_API_KEY.substring(0, 10));
     
     const bytes = await image.arrayBuffer();
@@ -182,16 +221,29 @@ async function tryRoboflowDetection(image: File) {
       try {
         console.log(`Trying Roboflow endpoint: ${endpoint}`);
         
-        const roboflowResponse = await fetch(
-          `https://detect.roboflow.com/${endpoint}?api_key=${process.env.ROBOFLOW_API_KEY}`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: base64,
+        const roboflowResponse = await retryWithBackoff(async () => {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+          
+          try {
+            const response = await fetch(
+              `https://detect.roboflow.com/${endpoint}?api_key=${process.env.ROBOFLOW_API_KEY}`,
+              {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: base64,
+                signal: controller.signal,
+              }
+            );
+            clearTimeout(timeoutId);
+            return response;
+          } catch (error) {
+            clearTimeout(timeoutId);
+            throw error;
           }
-        );
+        }, 2, 3000); // 2 retries with 3 second base delay
 
         console.log(`Roboflow response status for ${endpoint}:`, roboflowResponse.status);
         
@@ -227,36 +279,49 @@ async function tryRoboflowDetection(image: File) {
           }
         }
       } catch (endpointError) {
-        console.error(`Error with Roboflow endpoint ${endpoint}:`, endpointError);
+        console.error(`Error with Roboflow endpoint ${endpoint} after retries:`, endpointError);
       }
     }
 
-    // If all Roboflow endpoints failed, try to get available models
+    // If all Roboflow endpoints failed, try to get available models with retry
     try {
       console.log('Trying to get available Roboflow models...');
-      const modelsResponse = await fetch(
-        `https://api.roboflow.com/models?api_key=${process.env.ROBOFLOW_API_KEY}`
-      );
+      const modelsResponse = await retryWithBackoff(async () => {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+        
+        try {
+          const response = await fetch(
+            `https://api.roboflow.com/models?api_key=${process.env.ROBOFLOW_API_KEY}`,
+            { signal: controller.signal }
+          );
+          clearTimeout(timeoutId);
+          return response;
+        } catch (error) {
+          clearTimeout(timeoutId);
+          throw error;
+        }
+      }, 2, 2000); // 2 retries with 2 second base delay
       
       if (modelsResponse.ok) {
         const modelsData = await modelsResponse.json();
         console.log('Available Roboflow models:', JSON.stringify(modelsData, null, 2));
       }
     } catch (modelsError) {
-      console.error('Error fetching Roboflow models:', modelsError);
+      console.error('Error fetching Roboflow models after retries:', modelsError);
     }
 
     // If all endpoints failed
     return NextResponse.json({
       ingredients: ['tomatoes', 'onions', 'garlic', 'ginger', 'rice'],
-      message: 'Roboflow API access failed for all endpoints. Using fallback ingredients.'
+      message: 'Roboflow API access failed for all endpoints after retries. Using fallback ingredients.'
     });
 
   } catch (roboflowError) {
-    console.error('Roboflow detection failed:', roboflowError);
+    console.error('Roboflow detection failed after retries:', roboflowError);
     return NextResponse.json({
       ingredients: ['tomatoes', 'onions', 'garlic', 'ginger', 'rice'],
-      message: 'Ingredient detection service unavailable. Using sample ingredients.'
+      message: 'Ingredient detection service unavailable after retries. Using sample ingredients.'
     });
   }
 }
