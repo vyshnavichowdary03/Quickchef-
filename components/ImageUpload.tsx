@@ -8,15 +8,9 @@ import toast from 'react-hot-toast';
 
 interface ImageUploadProps {
   onIngredientsDetected: (ingredients: string[]) => void;
-  trackApiCall: (
-    endpoint: 'ingredientDetection' | 'recipeGeneration',
-    startTime: number,
-    success: boolean,
-    apiProvider: 'openai' | 'roboflow' | 'fallback'
-  ) => void;
 }
 
-export default function ImageUpload({ onIngredientsDetected, trackApiCall }: ImageUploadProps) {
+export default function ImageUpload({ onIngredientsDetected }: ImageUploadProps) {
   const [isUploading, setIsUploading] = useState(false);
   const [manualIngredients, setManualIngredients] = useState('');
   const [isListening, setIsListening] = useState(false);
@@ -28,7 +22,6 @@ export default function ImageUpload({ onIngredientsDetected, trackApiCall }: Ima
     setIsUploading(true);
     const formData = new FormData();
     formData.append('image', file);
-    const startTime = Date.now();
 
     try {
       const response = await fetch('/api/detect-ingredients', {
@@ -40,27 +33,16 @@ export default function ImageUpload({ onIngredientsDetected, trackApiCall }: Ima
         throw new Error('Failed to detect ingredients');
       }
 
-      const { ingredients, message } = await response.json();
+      const { ingredients } = await response.json();
       onIngredientsDetected(ingredients);
-      
-      // Determine which API was used based on the message
-      let apiProvider: 'openai' | 'roboflow' | 'fallback' = 'fallback';
-      if (message?.includes('OpenAI')) {
-        apiProvider = 'openai';
-      } else if (message?.includes('Roboflow')) {
-        apiProvider = 'roboflow';
-      }
-      
-      trackApiCall('ingredientDetection', startTime, true, apiProvider);
       toast.success('Ingredients detected successfully!');
     } catch (error) {
       console.error('Error detecting ingredients:', error);
-      trackApiCall('ingredientDetection', startTime, false, 'fallback');
       toast.error('Failed to detect ingredients. Please try again.');
     } finally {
       setIsUploading(false);
     }
-  }, [onIngredientsDetected, trackApiCall]);
+  }, [onIngredientsDetected]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,

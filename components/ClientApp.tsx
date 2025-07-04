@@ -7,9 +7,7 @@ import IngredientDisplay from '@/components/IngredientDisplay';
 import RecipeResults from '@/components/RecipeResults';
 import FavoriteRecipes from '@/components/FavoriteRecipes';
 import Footer from '@/components/Footer';
-import PerformanceMonitor from '@/components/PerformanceMonitor';
 import { Recipe } from '@/types/recipe';
-import { usePerformanceTracking } from '@/hooks/usePerformanceTracking';
 
 export default function ClientApp() {
   const [ingredients, setIngredients] = useState<string[]>([]);
@@ -18,17 +16,13 @@ export default function ClientApp() {
   const [isLoading, setIsLoading] = useState(false);
   const [currentStep, setCurrentStep] = useState<'upload' | 'ingredients' | 'recipes'>('upload');
 
-  const { trackApiCall, trackUserInteraction } = usePerformanceTracking();
-
   const handleIngredientsDetected = (detectedIngredients: string[]) => {
     setIngredients(detectedIngredients);
     setCurrentStep('ingredients');
-    trackUserInteraction('upload');
   };
 
   const handleGenerateRecipes = async (finalIngredients: string[]) => {
     setIsLoading(true);
-    const startTime = Date.now();
     
     try {
       const response = await fetch('/api/generate-recipes', {
@@ -46,14 +40,8 @@ export default function ClientApp() {
       const generatedRecipes = await response.json();
       setRecipes(generatedRecipes);
       setCurrentStep('recipes');
-      
-      // Track successful API call
-      trackApiCall('recipeGeneration', startTime, true, 'openai');
-      trackUserInteraction('recipeGenerated');
     } catch (error) {
       console.error('Error generating recipes:', error);
-      // Track failed API call
-      trackApiCall('recipeGeneration', startTime, false, 'fallback');
     } finally {
       setIsLoading(false);
     }
@@ -62,7 +50,6 @@ export default function ClientApp() {
   const handleAddToFavorites = (recipe: Recipe) => {
     if (!favoriteRecipes.find(fav => fav.id === recipe.id)) {
       setFavoriteRecipes(prev => [...prev, recipe]);
-      trackUserInteraction('favoriteSaved');
     }
   };
 
@@ -81,10 +68,7 @@ export default function ClientApp() {
       {currentStep === 'upload' && (
         <>
           <Hero />
-          <ImageUpload 
-            onIngredientsDetected={handleIngredientsDetected}
-            trackApiCall={trackApiCall}
-          />
+          <ImageUpload onIngredientsDetected={handleIngredientsDetected} />
         </>
       )}
 
@@ -115,7 +99,6 @@ export default function ClientApp() {
       )}
 
       <Footer />
-      <PerformanceMonitor />
     </>
   );
 }
